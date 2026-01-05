@@ -1,92 +1,96 @@
-const express = require('express');
-const cors = require('cors');
+# app.py - Backend Flask avec SDK Hyperliquid officiel
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from hyperliquid.info import Info
+from hyperliquid.utils import constants
+import os
 
-const app = express();
+app = Flask(__name__)
+CORS(app)  # Active CORS pour toutes les routes
 
-app.use(cors());
-app.use(express.json());
+# Initialiser l'API Hyperliquid
+info = Info(constants.MAINNET_API_URL, skip_ws=True)
 
-const HYPERLIQUID_API = 'https://api.hyperliquid.xyz/info';
+@app.route('/')
+def home():
+    return jsonify({
+        'status': 'ok',
+        'message': 'Trade.xyz Backend API - SDK Hyperliquid',
+        'endpoints': {
+            'meta': '/api/meta',
+            'prices': '/api/prices',
+            'user': '/api/user/<address>',
+            'fills': '/api/fills/<address>'
+        }
+    })
 
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'Trade.xyz Backend API'
-  });
-});
+@app.route('/api/meta')
+def get_meta():
+    """Récupérer les métadonnées (liste des assets)"""
+    try:
+        meta = info.meta()
+        return jsonify(meta)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-app.get('/api/meta', async (req, res) => {
-  try {
-    const fetch = (await import('node-fetch')).default;
-    const response = await fetch(HYPERLIQUID_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'meta' })
-    });
+@app.route('/api/prices')
+def get_prices():
+    """Récupérer tous les prix"""
+    try:
+        prices = info.all_mids()
+        return jsonify(prices)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+@app.route('/api/user/<address>')
+def get_user_state(address):
+    """Récupérer l'état d'un utilisateur"""
+    try:
+        # Valider l'adresse
+        if not address or not address.startswith('0x') or len(address) != 42:
+            return jsonify({'error': 'Invalid address format'}), 400
+        
+        user_state = info.user_state(address.lower())
+        return jsonify(user_state)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-app.get('/api/prices', async (req, res) => {
-  try {
-    const fetch = (await import('node-fetch')).default;
-    const response = await fetch(HYPERLIQUID_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'allMids' })
-    });
+@app.route('/api/fills/<address>')
+def get_user_fills(address):
+    """Récupérer les trades d'un utilisateur"""
+    try:
+        # Valider l'adresse
+        if not address or not address.startswith('0x') or len(address) != 42:
+            return jsonify({'error': 'Invalid address format'}), 400
+        
+        fills = info.user_fills(address.lower())
+        return jsonify(fills)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+@app.route('/api/candles/<coin>')
+def get_candles(coin):
+    """Récupérer les données de chandelier pour un asset"""
+    try:
+        interval = request.args.get('interval', '1h')
+        start_time = request.args.get('start_time', None)
+        end_time = request.args.get('end_time', None)
+        
+        candles = info.candles_snapshot(
+            coin=coin,
+            interval=interval,
+            start_time=int(start_time) if start_time else None,
+            end_time=int(end_time) if end_time else None
+        )
+        return jsonify(candles)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-app.get('/api/user/:address', async (req, res) => {
-  try {
-    const fetch = (await import('node-fetch')).default;
-    const { address } = req.params;
+@app.route('/health')
+def health():
+    """Endpoint de santé"""
+    return jsonify({'status': 'healthy'}), 200
 
-    const response = await fetch(HYPERLIQUID_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        type: 'clearinghouseState',
-        user: address.toLowerCase()
-      })
-    });
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.get('/api/fills/:address', async (req, res) => {
-  try {
-    const fetch = (await import('node-fetch')).default;
-    const { address } = req.params;
-
-    const response = await fetch(HYPERLIQUID_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        type: 'userFills',
-        user: address.toLowerCase()
-      })
-    });
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-module.exports = app;
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
